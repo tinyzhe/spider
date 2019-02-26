@@ -45,11 +45,13 @@ class Processor():
         self.spider()
 
     def spider(self):
-        areas = self.__db.selectAll('god_area',columns="cid,slug,category_name",where="status = 1 and level < 3 order by cid asc,level asc")
+        areas = self.__db.selectAll('god_area',columns="cid,slug,category_name",where="status = 1 and level < 3 and cid >= 2686 order by cid asc,level asc")
         for area in areas:
             searchKey = str(area['category_name']) + '林长制'
             url  = self.url + "/s?wd=" + searchKey
-            resCode = requests.get(url, headers=self.requestHeaders, timeout=20)
+            resCode = self.getRequest(url=url)
+            if not resCode:
+                continue
             resCode.encoding = 'utf-8'
             bsCode = BeautifulSoup(resCode.text, "lxml")
 
@@ -62,16 +64,17 @@ class Processor():
                 pageUrl = p.get("href")
                 pageUrl = self.url + str(pageUrl)
                 page = p.get_text()
-                if page != '下一页':
+                if page.find('下一页') == -1:
                     pageInfo[page] = pageUrl
                     print '--page is %s--' % page
                     print '--pageUrl is %s--' % pageUrl
-                    pageResCode = requests.get(pageUrl, headers=self.requestHeaders, timeout=20)
+                    pageResCode = self.getRequest(url=pageUrl)
+                    if not pageResCode:
+                        continue
                     pageResCode.encoding = 'utf-8'
                     pageBsCode = BeautifulSoup(resCode.text, "lxml")
                     self.formatInfo(bsCode=pageBsCode, area=area, searchKey=searchKey)
-            time.sleep(10)
-
+            #time.sleep(10)
 
     def get_real(self, o_url):
         '''获取重定向url指向的网址'''
@@ -87,14 +90,14 @@ class Processor():
         content = bsCode.select('#content_left')
         list = bsCode.find_all("div", class_="result")
         for info in list:
-            title = str(info.find("a").get_text())
-            href = info.find("a").get("href")
-            abstract = str(info.find("div", class_="c-abstract").get_text())
             try:
+                title = str(info.find("a").get_text())
+                href = info.find("a").get("href")
+                abstract = str(info.find("div", class_="c-abstract").get_text())
                 realUrl = self.get_real(href)
             except Exception as e:
                 log.logger.info(e)
-                self.exceptionAreaIds.append(area['cid'])
+                self.exceptionAreaIds.append(str(area['cid']))
                 log.logger.info(','.join(self.exceptionAreaIds))
 
             keywords = ['会议', '评审', '试行', '考察', '启动', '推行', '规划','改革']
@@ -107,6 +110,23 @@ class Processor():
                         self.__db.insert('god_baidu_spider_page', params_dic=params)
                         print title
                         break
+
+
+    def getRequest(self,url):
+        i = 1
+        while True:
+            try:
+                res = requests.get(url, headers=self.requestHeaders, timeout=20)
+                break
+            except Exception as e:
+                if i <=3:
+                    time.sleep(3)
+                    i += 1
+                    continue
+                else:
+                    res = ''
+                    break
+        return res
 
 
 Processor().run()
