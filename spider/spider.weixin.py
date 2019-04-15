@@ -62,7 +62,7 @@ class Processor():
             点赞阅读量接口研究：https://blog.csdn.net/qq_19383667/article/details/79380212
         """
     def spider(self):
-
+        origin = '王者荣耀'
         requestHeaders = {
             # 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             # 'Accept-Encoding': 'gzip, deflate, compress',
@@ -72,12 +72,12 @@ class Processor():
             'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36 MicroMessenger/6.5.2.501 NetType/WIFI WindowsWechat QBCore/3.43.1021.400 QQBrowser/9.0.2524.400',
         }
 
-        requestHeaders['Cookie'] = 'rewardsn=; wxtokenkey=777; wxuin=1981385113; devicetype=Windows10; version=62060739; lang=zh_CN; pass_ticket=LIFYpBO1DldToCdN7Lk7rsEnTZZRprDfnRKofMV3WU+PI/cgHsDkbjvC/+e/eZQM; wap_sid2=CJmT5rAHElw0ZGl6X3JjNHpYclF5UTdNbi1UODRPWGRUbVJaY2FGYl9DUzdJVHFMel96OE40bGVDVmR1bDRxeU1ndXNXOGRZWWFnTzZnWXJZM1BjaGJqd2JreWFvZXdEQUFBfjC9hNHlBTgNQJVO'
+        requestHeaders['Cookie'] = 'wxuin=1981385113; devicetype=Windows10; version=62060739; lang=zh_CN; pass_ticket=rDLPD+yXY6RJogi6EggsKpEK1g0Sj9PgA8kcf3nxPnHw/IFyVxzRw4oOl52XE0VQ; wap_sid2=CJmT5rAHElxxeWtIdF9XN0YybldZTG10bU1oMVQxQzRTRTBvdnJlTUFrNTRuREJnbWRabTE5dkVpSk5WUUhkSG1oYkt6MVNpVmxkM3VCemctT180OXkwdzhaUUVXT3dEQUFBfjCl9dHlBTgNQJVO'
 
         host_url = "https://mp.weixin.qq.com"
-        target_url = "/mp/profile_ext?action=getmsg&__biz=MzIwOTA3Njg3MQ==&f=json&offset=10&count=10&is_ok=1&scene=124&uin=MTk4MTM4NTExMw%3D%3D&key=7c2de03dd17390139ef9f69a48ee3d8cdc58b21bb9385d6fce65767425302437c2694dee53b204753bcea8fb585ec632bf759d118662695b0bd5659d57044635d3ecb053be69d3b406b6a5b529c2d9d4&pass_ticket=LIFYpBO1DldToCdN7Lk7rsEnTZZRprDfnRKofMV3WU%2BPI%2FcgHsDkbjvC%2F%2Be%2FeZQM&wxtoken=&appmsg_token=1004_82TgTROciyuhltJERpY9hJfKhAgrJszMcvrC4Q~~&x5=0&f=json HTTP/1.1"
+        target_url = "/mp/profile_ext?action=getmsg&__biz=MzIwMTI1OTI3MA==&f=json&offset=10&count=10&is_ok=1&scene=124&uin=MTk4MTM4NTExMw%3D%3D&key=ff9ac6c3589d28b3819431bcf2743608fd7af2c6ff19307980bb80f013149ab8c44f39bfd074bff20d37086b481855df4aef84de4f5da041f5b9f4bd59f9b9bcb45de04891ab9114730572f4b6834126&pass_ticket=rDLPD%2ByXY6RJogi6EggsKpEK1g0Sj9PgA8kcf3nxPnHw%2FIFyVxzRw4oOl52XE0VQ&wxtoken=&appmsg_token=1004_gI7SMKLRl2HUlx9kAnZONy9iqjDwg-lBlaE5oQ~~&x5=0&f=json HTTP/1.1"
 
-        page = 49
+        page = 1
         pagesize = 10
         while True:
             url = host_url + target_url
@@ -98,16 +98,20 @@ class Processor():
             list = general_msg_list['list']
             for value in list:
                 comm_msg_info = value['comm_msg_info']
+
                 datetime = comm_msg_info['datetime'] # 时间戳
                 datetime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(datetime))
                 article_type = comm_msg_info['type']
                 if article_type == 49:
                     article_type = '图文消息'
                     app_msg_ext_info = value['app_msg_ext_info']
+
                     title = app_msg_ext_info['title'] #标题
                     cotent_url = app_msg_ext_info['content_url'].replace("&amp;","&") #内容url
                     cover = app_msg_ext_info['cover'] #封面
                     author = app_msg_ext_info['author'] #作者
+                    digest = app_msg_ext_info['digest'] #关键字
+                    is_multi = app_msg_ext_info['is_multi'] #是否多图文
                     copyright_stat = '原创' if app_msg_ext_info.has_key('copyright_stat') and app_msg_ext_info['copyright_stat'] == 11 else '非原创'
                     print '%s--%s--%s--%s' % (title,author,copyright_stat,datetime)
                     # 抓取文章内容
@@ -115,10 +119,12 @@ class Processor():
                     # contentCode.encoding = 'utf-8'
                     # bsCode = BeautifulSoup(contentCode.text, "lxml")
 
-                    info = {"title":title,"cotent_url":cotent_url,"cover":cover,"author":author,"copyright_stat":copyright_stat,"publish_time":datetime,"origin":"行测风暴羚羊","article_type":article_type}
-                    r = self.__db.selectOne("weixin_spider",where="title = '%s' and publish_time = '%s'" % (title,datetime))
+                    info = {"title":title,"cotent_url":cotent_url,"cover":cover,"author":author,"copyright_stat":copyright_stat,
+                            "publish_time":datetime,"origin":origin,"article_type":article_type,"digest":digest}
+                    continue
+                    r = self.__db.selectOne("mp_article",where="title = '%s' and publish_time = '%s'" % (title,datetime))
                     if not r:
-                        self.__db.insert("weixin_spider",params_dic=info)
+                        self.__db.insert("mp_article",params_dic=info)
 
             page += 1
 

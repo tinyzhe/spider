@@ -18,7 +18,7 @@ FILE_LOG_DIR = SYSTEM_ROOT + '/' + 'data/log'
 DB = {
     'host':'127.0.0.1',
     'user':'root',
-    'password':'',
+    'password':'root',
     'port':3306,
     'dbname':'spider'
 }
