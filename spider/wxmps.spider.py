@@ -209,9 +209,9 @@ class WxMps(object):
         try:
             like_num = content["appmsgstat"]["like_num"] if content else 0
             read_num = content["appmsgstat"]["read_num"] if content else 0
-            print "阅读获取成功"
+            print "阅读数抓取成功"
         except:
-            print "阅读数获取失败"
+            print "阅读数抓取失败"
         self.__db.update("mp_article", params_dic={"like_num": like_num,"read_num": read_num},where="article_id = %d" % article_id)
         time.sleep(round(1, 3))
 
