@@ -27,6 +27,7 @@ import time
 from datetime import datetime
 
 import requests
+import urlparse
 
 
 
@@ -40,7 +41,7 @@ class WxMps(object):
         self.pass_ticket = _pass_ticket  # 票据(非固定)
         self.headers = {
             'Cookie': _cookie,  # Cookie(非固定)
-            'User-Agent': 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/57.0.2987.132 '
+            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36 MicroMessenger/6.5.2.501 NetType/WIFI WindowsWechat QBCore/3.43.27.400 QQBrowser/9.0.2524.400'
         }
         self.__db = dbmanager.DB(conf=config.DB)  # 数据库配置
 
@@ -56,7 +57,7 @@ class WxMps(object):
             resp = requests.get(api, headers=self.headers,verify=False).json()
             ret, status = resp.get('ret'), resp.get('errmsg')  # 状态信息
             if ret == 0 or status == 'ok':
-                print('Crawl article: ' + api)
+                print('Crawl article')
                 offset = resp['next_offset']  # 下一次请求偏移量
                 general_msg_list = resp['general_msg_list']
                 msg_list = json.loads(general_msg_list)['list']  # 获取文章列表
@@ -129,18 +130,6 @@ class WxMps(object):
             self.__db.insert("mp_content", params_dic=contentInfo)
             self._parse_article_detail(content_url, article_id)
 
-    def _crawl_msgstat(self, app_msg_id, comment_id, appmsg_token, article_id):
-        """抓取文章的浏览数、点赞数、评论数,url及参数已确定，还需正则匹配mid、sn、idx参数即可"""
-
-        api = "https://mp.weixin.qq.com/mp/getappmsgext?appmsg_type=9&is_temp_url=0&is_only_read=1" \
-                     "&__biz={0}&mid={1}&sn={2}&idx={3}&appmsg_token={4}&x5=1".format(self.biz, '2840359295', '78361fd5e82d3ef45f0626db44d76128', 1,appmsg_token)
-
-        resp = requests.get(api, headers=self.headers, verify=False)
-        print resp.text
-        exit()
-
-
-
     def crawl_article_content(self,content_url):
         """抓取文章内容、点赞数、评论数
         :param content_url: 文章地址
@@ -149,7 +138,6 @@ class WxMps(object):
         try:
             html = requests.get(content_url, verify=False).text
         except:
-            print(content_url)
             pass
         else:
             bs = BeautifulSoup(html, 'html.parser')
@@ -168,17 +156,18 @@ class WxMps(object):
         """从文章页提取相关参数用于获取评论,article_id是已保存的文章id"""
 
         try:
-            html = requests.get(content_url, headers=self.headers, verify=False).text  # 文章详情
+            body = requests.get(content_url, headers=self.headers, verify=False).text  # 文章详情
         except Exception as e:
             print('获取评论失败' + content_url)
         else:
             # group(0) is current line
+            str_comment = re.search(r'var comment_id = "(.*)" \|\| "(.*)" \* 1;', body)
+            str_msg = re.search(r"var appmsgid = '' \|\| '(.*)'\|\|", body)
+            str_token = re.search(r'window.appmsg_token = "(.*)";', body)
 
-            str_comment = re.search(r'var comment_id = "(.*)" \|\| "(.*)" \* 1;', html)
-            str_msg = re.search(r"var appmsgid = '' \|\| '(.*)'\|\|", html)
-            str_token = re.search(r'window.appmsg_token = "(.*)";', html)
-
-
+            # 更新文章阅读数、评论数
+            self._crawl_msgstat(content_url, article_id)
+            # 抓取评论数据
             if str_comment and str_msg and str_token:
                 comment_id = str_comment.group(1)  # 评论id(固定)
                 app_msg_id = str_msg.group(1)  # 票据id(非固定)
@@ -186,11 +175,47 @@ class WxMps(object):
 
                 # 缺一不可
                 if appmsg_token and app_msg_id and comment_id:
-                    print('Crawl article comments: ' + content_url)
-                    # 更新文章阅读数、评论数
-                    self._crawl_msgstat(app_msg_id, comment_id, appmsg_token, article_id)
-                    # 抓取评论数据
+                    print('开始抓取评论……')
                     self._crawl_comments(app_msg_id, comment_id, appmsg_token, article_id)
+
+    def _crawl_msgstat(self, content_url, article_id):
+        """抓取文章的浏览数、点赞数、评论数,url及参数已确定，还需正则匹配mid、sn、idx参数即可"""
+        data = {
+            "is_only_read": "1",
+            "is_temp_url": "0",
+            "appmsg_type": "9",  # 新参数，不加入无法获取like_num
+        }
+
+        """
+        添加请求参数
+        __biz对应公众号的信息，唯一
+        mid、sn、idx分别对应每篇文章的url的信息，需要从url中进行提取
+        key、appmsg_token从fiddler上复制即可
+        pass_ticket对应的文章的信息，貌似影响不大，也可以直接从fiddler复制
+        """
+
+        # 由于上面这种方法可能会获取数据失败，可以采取字符串拼接这种方法
+        result = urlparse.urlparse(content_url)
+        params = urlparse.parse_qs(result.query)
+
+        print '正在抓取阅读数……'
+        origin_url = "https://mp.weixin.qq.com/mp/getappmsgext?"
+        appmsgext_url = origin_url + "__biz={}&mid={}&sn={}&idx={}&appmsg_token={}&x5=0&f=json".format(self.biz, params['mid'][0],
+                                                                                                params['sn'][0], params['idx'][0],
+                                                                                                self.msg_token)
+        content = requests.post(appmsgext_url, headers=self.headers, data=data, verify=False).json()
+        # 提取其中的阅读数和点赞数
+        like_num = read_num = 0
+        ret, status = content['base_resp']['ret'], content['base_resp']['errmsg']
+        if ret == 0 or status == 'ok':
+            like_num = content["appmsgstat"]["like_num"] if content else 0
+            read_num = content["appmsgstat"]["read_num"] if content else 0
+            print "阅读获取成功"
+        else:
+            print "阅读数获取失败"
+        self.__db.update("mp_article", params_dic={"like_num": like_num,"read_num": read_num},where="article_id = %d" % article_id)
+        time.sleep(round(1, 3))
+
 
     def _crawl_comments(self, app_msg_id, comment_id, appmsg_token, article_id):
         """抓取文章的评论"""
@@ -218,15 +243,17 @@ class WxMps(object):
                         "like_num": like_num,"comment_time":comment_time,"create_time":time.strftime("%Y-%m-%d %H:%M:%S",time.localtime(time.time()))}
 
                 self.__db.insert("mp_comment", info)
+            print "评论抓取完成"
 
 
 if __name__ == '__main__':
     biz = 'MzIwMTI1OTI3MA=='  # "王者荣耀"
-    pass_ticket = 'rDLPD+yXY6RJogi6EggsKpEK1g0Sj9PgA8kcf3nxPnHw/IFyVxzRw4oOl52XE0VQ'
-    app_msg_token = '1004_qtjkHjfXSQnNg29Qe9PD2UDDlIb7I9KMM468ng~~'
-    cookie = 'wxuin=1981385113; devicetype=Windows10; version=62060739; lang=zh_CN; pass_ticket=rDLPD+yXY6RJogi6EggsKpEK1g0Sj9PgA8kcf3nxPnHw/IFyVxzRw4oOl52XE0VQ; wap_sid2=CJmT5rAHElw1MlVwQXZYOFJZSjRvaFZtRDh5U0hWMDhEcGdCNWs2cXRZdkFITlNIZGQyOElOYWlXSDByOElrSlVwbEVacWRLU3VkcEFLeVBVRl81bUZ1TnMwUUlDZXdEQUFBfjCMjNLlBTgNQJVO'
+    pass_ticket = 'vk4JzNXWvAFIqjy1E1j7ilH8932vrjQw09zSkYZuPemHx7v8E5k/lFyGE7yBjSfg'
+    app_msg_token = '1005_wdGaW%2B7aqwah322rGOtzhvZGT5mAND_DjI1SxQ~~'
+    cookie = 'rewardsn=; wxtokenkey=777; wxuin=1981385113; devicetype=Windows10; version=62060739; lang=zh_CN; pass_ticket=vk4JzNXWvAFIqjy1E1j7ilH8932vrjQw09zSkYZuPemHx7v8E5k/lFyGE7yBjSfg; wap_sid2=CJmT5rAHElxVd1RCODREU2pZNlpZa25RRjJ2bEV6Y0F6elBPWVNNalloSVBFNHFieE5mQUtJZ2w1X2hJVmxtbkI4V3FmTlhHWkxCT0RUSVNJQWlOX0x5SjQ2bTdsZTBEQUFBfjCTjd3lBTgNQJVO'
+
     origin = '王者荣耀'
     # 以上信息不同公众号每次抓取都需要借助抓包工具做修改
-    wxMps = WxMps(biz, pass_ticket, app_msg_token, cookie, origin, 620)
+    wxMps = WxMps(biz, pass_ticket, app_msg_token, cookie, origin, 0)
     wxMps.start()  # 开始爬取文章及评论
 
