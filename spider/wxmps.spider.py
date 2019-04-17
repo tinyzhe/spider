@@ -206,12 +206,11 @@ class WxMps(object):
         content = requests.post(appmsgext_url, headers=self.headers, data=data, verify=False).json()
         # 提取其中的阅读数和点赞数
         like_num = read_num = 0
-        ret, status = content['base_resp']['ret'], content['base_resp']['errmsg']
-        if ret == 0 or status == 'ok':
+        try:
             like_num = content["appmsgstat"]["like_num"] if content else 0
             read_num = content["appmsgstat"]["read_num"] if content else 0
             print "阅读获取成功"
-        else:
+        except:
             print "阅读数获取失败"
         self.__db.update("mp_article", params_dic={"like_num": like_num,"read_num": read_num},where="article_id = %d" % article_id)
         time.sleep(round(1, 3))
