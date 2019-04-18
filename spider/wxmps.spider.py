@@ -29,6 +29,7 @@ from datetime import datetime
 import requests
 import urlparse
 import pdfkit
+import webbrowser
 
 
 
@@ -66,6 +67,7 @@ class WxMps(object):
                     comm_msg_info = msg['comm_msg_info']  # 该数据是本次推送多篇文章公共的
                     msg_id = comm_msg_info['id']  # 文章id
                     publish_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(comm_msg_info['datetime']))  # 发布时间
+
                     msg_type = comm_msg_info['type']  # 文章类型
                     # msg_data = json.dumps(comm_msg_info, ensure_ascii=False)  # msg原数据
                     if msg_type == 49:
@@ -113,12 +115,12 @@ class WxMps(object):
 
         content_url = content_url.replace('amp;', '').replace('#wechat_redirect', '').replace('http', 'https')
 
-
+        createTime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
 
         # article保存入库
         info = {"title": title, "content_url": content_url, "cover": cover, "author": author,"is_multi": is_multi,
                 "copyright_stat": copyright_stat,"source_url":source_url,"msg_id":msg_id,"is_main":is_main,
-                "publish_time": publish_time, "origin": origin, "article_type": article_type, "digest": digest}
+                "publish_time": publish_time, "origin": origin, "article_type": article_type, "digest": digest, "create_time":createTime}
         r = self.__db.selectOne("mp_article", where="title = '%s' and publish_time = '%s'" % (title, publish_time))
         article_id = 0
         if not r:
@@ -126,53 +128,52 @@ class WxMps(object):
             self.__db.insert("mp_article", params_dic=info)
             article_id = self.__db.get_inserted_id()
         if article_id:
-            # 文章详情保存入库
-            contentInfo = self.crawl_article_content(content_url)
-            print contentInfo
-            print article_id
-            contentInfo['article_id'] = article_id
-            self.__db.insert("mp_content", params_dic=contentInfo)
-            self._parse_article_detail(content_url, article_id)
+            # 抓取正文内容
+            self._parse_article_detail(content_url, article_id, info)
 
-    def crawl_article_content(self,content_url):
-        """抓取文章内容、点赞数、评论数
-        :param content_url: 文章地址
-        """
-
-        try:
-            html = requests.get(content_url, verify=False).text
-            # pdfkit.from_string(content_url, 'data/files/test.pdf')
-        except:
-            pass
-        else:
-            bs = BeautifulSoup(html, 'html.parser')
-            content = ''
-            js_content = bs.find(id='js_content')
-            if js_content:
-                p_list = js_content.find_all('p')
-                content_list = list(map(lambda p: p.text, filter(lambda p: p.text != '', p_list)))
-                content = ''.join(content_list)
-
-            data = {"html": bs,"content": content}
-            return data
-
-
-    def _parse_article_detail(self, content_url, article_id=0):
+    def _parse_article_detail(self, content_url, article_id=0, info={}):
         """从文章页提取相关参数用于获取评论,article_id是已保存的文章id"""
 
         try:
             body = requests.get(content_url, headers=self.headers, verify=False).text  # 文章详情
+            print('已获取正文内容，正在分析……')
         except Exception as e:
-            print('获取评论失败' + content_url)
+            print('获取正文内容失败' + content_url)
         else:
-            # group(0) is current line
+            # 生成本地html文件
+            dirName = u"E:/微信抓取/%s" % self.origin
+            if not os.path.exists(dirName):
+                os.makedirs(dirName)
+
+
+            fileName = info['title'] if info else time.strftime("%Y%m%d", time.localtime(time.time()))
+            reg = re.compile("[\\\/:\*\?\|<>\"]")
+            fileName = reg.sub("", fileName)
+
+            storagePath = u"%s/%s.html" % (dirName,str(fileName))
+            print info['title']
+            self.storageToLocalFiles(storagePath, body)
+
+            # 文章内容保存入库
+            bs = BeautifulSoup(body, 'html.parser')
+            js_content = bs.find(id='js_content')
+            if js_content:
+                # content = self.__removeHTML(js_content)
+                p_list = js_content.find_all('p')
+                content_list = list(map(lambda p: p.text, filter(lambda p: p.text != '', p_list)))
+                content = ''.join(content_list)
+
+                data = {"html": bs,"content": content, "article_id":article_id}
+                self.__db.insert("mp_content", params_dic=data)
+
+            # 更新文章阅读数、评论数
+            self._crawl_msgstat(content_url, article_id)
+
+            # 抓取评论数据
             str_comment = re.search(r'var comment_id = "(.*)" \|\| "(.*)" \* 1;', body)
             str_msg = re.search(r"var appmsgid = '' \|\| '(.*)'\|\|", body)
             str_token = re.search(r'window.appmsg_token = "(.*)";', body)
 
-            # 更新文章阅读数、评论数
-            self._crawl_msgstat(content_url, article_id)
-            # 抓取评论数据
             if str_comment and str_msg and str_token:
                 comment_id = str_comment.group(1)  # 评论id(固定)
                 app_msg_id = str_msg.group(1)  # 票据id(非固定)
@@ -249,15 +250,31 @@ class WxMps(object):
                 self.__db.insert("mp_comment", info)
             print "评论抓取完成"
 
+    '''
+    移除html
+    '''
+    def __removeHTML(self, content):
+        reg = re.compile('<[^>]*>')
+        content = reg.sub('', content)
+        return content
+
+    """
+    生成html文件
+    """
+    def storageToLocalFiles(self, storagePath, data):
+        data = data.replace("data-src", "src")
+        fhandle = open(storagePath, "wb")
+        fhandle.write(data)
+        fhandle.close()
 
 if __name__ == '__main__':
-    biz = 'MjM5Mzg3OTg4MQ=='  # "Python爱好者社区"
-    pass_ticket = 'mCDqEQb9JT3AYKqw/6hakCFM9eUo qol Uv S6ORg7ql7n4/5Ozq4H3CnKLBn3g/'
-    app_msg_token = '1005_YE8yJ1udn%2F9jnfwheYO1ke0WJZeNgbnGqjl1bg~~'
-    cookie = 'wxuin=1981385113; devicetype=Windows10; version=62060739; lang=zh_CN; pass_ticket=mCDqEQb9JT3AYKqw/6hakCFM9eUo+qol+Uv+S6ORg7ql7n4/5Ozq4H3CnKLBn3g/; wap_sid2=CJmT5rAHElxiMXNnTHdFaVNOS2ctWElfT1BxQVZLcjRRZ2ZxT004SUR1WENHWk5scDdleXVKQWl6U1ZIY0d3QjUtdjU0NGt4WjVwR1ZlZVZXSWEyak9MSWpwMEt6LTBEQUFBfjCD6ODlBTgNQJVO'
+    biz = 'MzIwMTI1OTI3MA=='  # "王者荣耀"
+    pass_ticket = 'PSdN9DoSxR7at7qkNIUbJzmfBvUahMYziC+/xstcjDbQfXIq87076IFKcGQiPlRG'
+    app_msg_token = '1005_EPmwvAfyBfjs8IFD5PxiirIg6FZh0DtlXFcOuA~~'
+    cookie = 'wxuin=1981385113; devicetype=Windows10; version=62060739; lang=zh_CN; pass_ticket=PSdN9DoSxR7at7qkNIUbJzmfBvUahMYziC+/xstcjDbQfXIq87076IFKcGQiPlRG; wap_sid2=CJmT5rAHElxuMTVGa19scXhLVXJGR2s0NnVDOGRvQUR5U19KSTlaOEdEMGFfZElZNlRWZVdVWmM0VTg4cTdJMzBoZlFOcV9KVTV0VFozN0F4TDFTM3BPSTRtLWdhLTBEQUFBfjCRv+HlBTgNQJVO'
 
-    origin = 'Python爱好者社区'
+    origin = '王者荣耀'
     # 以上信息不同公众号每次抓取都需要借助抓包工具做修改
-    wxMps = WxMps(biz, pass_ticket, app_msg_token, cookie, origin, 0)
+    wxMps = WxMps(biz, pass_ticket, app_msg_token, cookie, origin, 10)
     wxMps.start()  # 开始爬取文章及评论
 
