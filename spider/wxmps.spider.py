@@ -28,6 +28,7 @@ from datetime import datetime
 
 import requests
 import urlparse
+import pdfkit
 
 
 
@@ -57,7 +58,7 @@ class WxMps(object):
             resp = requests.get(api, headers=self.headers,verify=False).json()
             ret, status = resp.get('ret'), resp.get('errmsg')  # 状态信息
             if ret == 0 or status == 'ok':
-                print('Crawl article')
+                print('已获取文章列表，正在分析……')
                 offset = resp['next_offset']  # 下一次请求偏移量
                 general_msg_list = resp['general_msg_list']
                 msg_list = json.loads(general_msg_list)['list']  # 获取文章列表
@@ -93,7 +94,7 @@ class WxMps(object):
                         #入库程序，待完善
                 print('next offset is %d' % offset)
             else:
-                print('Before break , Current offset is %d' % offset)
+                print('微信验证错误 , Current offset is %d' % offset)
                 break
 
     def _parse_articles(self, info, msg_id, publish_time, msg_type, is_main):
@@ -105,7 +106,7 @@ class WxMps(object):
         digest = info.get('digest')  # 关键字
         source_url = info.get('source_url')  # 原文地址
         content_url = info.get('content_url')  # 微信地址
-        is_multi = info.get('is_multi')  # 是否多图文
+        is_multi = info.get('is_multi') if info.get('is_multi') else 0  # 是否多图文
         copyright_stat = '原创' if info.has_key('copyright_stat') and info['copyright_stat'] == 11 else '非原创'
         article_type = msg_type
         # ext_data = json.dumps(info, ensure_ascii=False)  # 原始数据
@@ -121,11 +122,14 @@ class WxMps(object):
         r = self.__db.selectOne("mp_article", where="title = '%s' and publish_time = '%s'" % (title, publish_time))
         article_id = 0
         if not r:
+            print digest
             self.__db.insert("mp_article", params_dic=info)
             article_id = self.__db.get_inserted_id()
         if article_id:
             # 文章详情保存入库
             contentInfo = self.crawl_article_content(content_url)
+            print contentInfo
+            print article_id
             contentInfo['article_id'] = article_id
             self.__db.insert("mp_content", params_dic=contentInfo)
             self._parse_article_detail(content_url, article_id)
@@ -137,6 +141,7 @@ class WxMps(object):
 
         try:
             html = requests.get(content_url, verify=False).text
+            # pdfkit.from_string(content_url, 'data/files/test.pdf')
         except:
             pass
         else:
@@ -246,12 +251,12 @@ class WxMps(object):
 
 
 if __name__ == '__main__':
-    biz = 'MzIwMTI1OTI3MA=='  # "王者荣耀"
-    pass_ticket = 'vk4JzNXWvAFIqjy1E1j7ilH8932vrjQw09zSkYZuPemHx7v8E5k/lFyGE7yBjSfg'
-    app_msg_token = '1005_wdGaW%2B7aqwah322rGOtzhvZGT5mAND_DjI1SxQ~~'
-    cookie = 'rewardsn=; wxtokenkey=777; wxuin=1981385113; devicetype=Windows10; version=62060739; lang=zh_CN; pass_ticket=vk4JzNXWvAFIqjy1E1j7ilH8932vrjQw09zSkYZuPemHx7v8E5k/lFyGE7yBjSfg; wap_sid2=CJmT5rAHElxVd1RCODREU2pZNlpZa25RRjJ2bEV6Y0F6elBPWVNNalloSVBFNHFieE5mQUtJZ2w1X2hJVmxtbkI4V3FmTlhHWkxCT0RUSVNJQWlOX0x5SjQ2bTdsZTBEQUFBfjCTjd3lBTgNQJVO'
+    biz = 'MjM5Mzg3OTg4MQ=='  # "Python爱好者社区"
+    pass_ticket = 'mCDqEQb9JT3AYKqw/6hakCFM9eUo qol Uv S6ORg7ql7n4/5Ozq4H3CnKLBn3g/'
+    app_msg_token = '1005_YE8yJ1udn%2F9jnfwheYO1ke0WJZeNgbnGqjl1bg~~'
+    cookie = 'wxuin=1981385113; devicetype=Windows10; version=62060739; lang=zh_CN; pass_ticket=mCDqEQb9JT3AYKqw/6hakCFM9eUo+qol+Uv+S6ORg7ql7n4/5Ozq4H3CnKLBn3g/; wap_sid2=CJmT5rAHElxiMXNnTHdFaVNOS2ctWElfT1BxQVZLcjRRZ2ZxT004SUR1WENHWk5scDdleXVKQWl6U1ZIY0d3QjUtdjU0NGt4WjVwR1ZlZVZXSWEyak9MSWpwMEt6LTBEQUFBfjCD6ODlBTgNQJVO'
 
-    origin = '王者荣耀'
+    origin = 'Python爱好者社区'
     # 以上信息不同公众号每次抓取都需要借助抓包工具做修改
     wxMps = WxMps(biz, pass_ticket, app_msg_token, cookie, origin, 0)
     wxMps.start()  # 开始爬取文章及评论
