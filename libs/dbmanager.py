@@ -25,18 +25,10 @@ class DB(object):
         #数据库构造函数，从连接池中取出连接，并生成操作游标
         self.conn = DB.__getConn(conf)
         self.cursor = self.conn.cursor()
-
-        '''
-        try:
-            self.conn = MySQLdb.Connect(host=config.DATABASE['host'], user=config.DATABASE['user'],passwd=config.DATABASE['password'], port=config.DATABASE['port'])
-            self.conn.set_character_set('utf8')
-            self.conn.select_db(config.DATABASE['dbname'])
-            self.conn.autocommit(1)
-        except MySQLdb.Error, e:
-            print "MySQL error" + e.__str__()
-
-        self.cursor = self.conn.cursor(cursorclass=MySQLdb.cursors.DictCursor)
-        '''
+        # Enforce UTF-8 for the connection.
+        self.cursor.execute('SET NAMES utf8mb4')
+        self.cursor.execute("SET CHARACTER SET utf8mb4")
+        self.cursor.execute("SET character_set_connection=utf8mb4")
 
     def __del__(self):
         self.cursor.close()
@@ -56,7 +48,7 @@ class DB(object):
         if DB.__pool.has_key(key)==False or not(DB.__pool[key]):
             DB.__pool[key] = PooledDB(creator=MySQLdb, mincached=1, maxcached=100,
                               host=conf['host'], port=conf['port'], user=conf['user'], passwd=conf['password'],
-                              db=conf['dbname'], use_unicode=False, charset='utf8', cursorclass=DictCursor, setsession=['SET AUTOCOMMIT = 1'])
+                              db=conf['dbname'], use_unicode=True, charset='utf8', cursorclass=DictCursor, setsession=['SET AUTOCOMMIT = 1'])
             DB.__pool[key].connection()
 
         return DB.__pool[key].connection()
